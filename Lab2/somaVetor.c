@@ -13,11 +13,18 @@ typedef struct
     long int startIndex, finalIndex;
 } ThreadArg;
 
+// Variável global para fácil acesso por todas as threads
+// Não há problemas pois seus valores não serão alterados durante a execução do código
 Array* array;
 
+// Inicializa um vetor com valores a partir da iostream
 Array* loadArray();
+// Realiza a soma dos elementos em um slice do vetor no escopo global
 void* sumArray(void* arg);
+// Retorna o menor valor entre dois long int
 long int min(long int a, long int b);
+// Testa se o valor encontrado para soma dos elementos do vetor está correto
+// dada uma tolerância (para levar em conta erros de ponto flutuante)
 int test(Array* array, float arraySum, float errorTolerance);
 void printArray(Array* array);
 
@@ -79,6 +86,8 @@ int main(int argc, char* argv[])
         }
 
         threadargs[i]->startIndex = i * blockSize;
+        // Caso (i + 1) * blockSize fique maior que o índice do último elemento do vetor,
+        // min retornará o próprio índice do último elemento do vetor
         threadargs[i]->finalIndex = min((i + 1) * blockSize, array->size) - 1;
         
         if(pthread_create(&threads[i], NULL, sumArray, (void*)threadargs[i]))
@@ -95,7 +104,9 @@ int main(int argc, char* argv[])
             fprintf(stderr, "ERRO--pthread_create\n");
             return 5;
         }
+        // 
         sum += *retorno;
+
         free(retorno);
         free(threadargs[i]);
     }
@@ -162,7 +173,6 @@ void* sumArray(void* arg)
     ThreadArg* args = (ThreadArg*) arg;
     int i;
     float* sum;
-
     sum = malloc(sizeof(float));
     if(sum == NULL)
     {
@@ -181,13 +191,8 @@ void* sumArray(void* arg)
 long int min(long int a, long int b)
 {    
     if(a < b)
-    {
         return a;
-    }
-    else
-    {
-        return b;
-    }
+    return b;
 }
 
 int test(Array* array, float arraySum, float errorTolerance)
@@ -196,8 +201,13 @@ int test(Array* array, float arraySum, float errorTolerance)
     for(i = 0; i < array->size; i++)
         arraySum -= array->value[i];
 
+    //arraySum idealmente seria 0, mas provavelmente não será devido
+    // a erro de ponto flutuante
     if(arraySum > errorTolerance)
+    {
+        printf("O erro foi de %f.\n", arraySum);
         return 1;
+    }
 
     return 0;
 }
