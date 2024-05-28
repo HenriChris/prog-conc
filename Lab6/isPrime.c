@@ -16,46 +16,45 @@ typedef struct
 
 typedef struct
 {
-    int id;
     long long int primesCounted;
 } ThreadInfo;
 
 Buffer buffer;
 
 long long int sequentialNumOfPrimes = 0;
-
 long long int arraySize = 0;
 
-long long int consumedCount = 0;
+// Insere elementos em um buffer circular
+void bufferInsert (long long int element);
 
-sem_t consumedSem;
+//Remove um elemento de um buffer circular
+long long int bufferRemove ();
 
-void bufferInsert(long long int element);
+// Carrega valores no buffer a partir de um arquivo binário
+void *producer (void *arg);
 
-long long int bufferRemove();
+// Opera sobre os valores do buffer, testando a primalidade deles e contando quantos são primos ou não
+void *consumer (void *arg);
 
-void *producer(void *arg);
+// Realiza teste de primalidade
+int ehPrimo (long long int n);
 
-void *consumer(void *arg);
-
-int ehPrimo(long long int n);
-
-int main(int argc, char* argv[])
+int main (int argc, char* argv[])
 {
+    int numOfThreads;
+    
+    long long int concurrentNumOfPrimes = 0;
+    int winnerIndex = 0;
+    long long int maxPrimes = 0;
+
     ThreadInfo *threadInfos;
 
     pthread_t threadProd;
     pthread_t *threadsCons;
-
-    int numOfThreads;
-    long long int concurrentNumOfPrimes = 0;
-
-    int winnerIndex = 0;
-    long long int maxPrimes = 0;
-
+    
     int i;
 
-    if(argc != 4)
+    if (argc != 4)
     {
         fprintf(stderr, "Utilização correta : %s "
         "<Quantidade de threads consumidoras> <Tamanho do buffer> <Path do arquivo de entrada>\n", argv[0]);
@@ -69,64 +68,83 @@ int main(int argc, char* argv[])
     if (!buffer.values)
     {
         fprintf(stderr, "Erro de alocação de memória\n");
-        exit(2);
+        return 2;
     }
     buffer.in = 0;
     buffer.out = 0;
     sem_init(&buffer.emptySlot, 0, buffer.size);
     sem_init(&buffer.fullSlot, 0, 0);
     sem_init(&buffer.mutexCons, 0, 1);
-    sem_init(&consumedSem, 0, 1);
 
     threadsCons = malloc((sizeof(pthread_t) * numOfThreads));
     if (!threadsCons)
     {
         fprintf(stderr, "Erro de alocação de memória\n");
-        exit(2);
+        free(buffer.values);
+        return 2;
     }
     
     threadInfos = malloc(sizeof(ThreadInfo) * numOfThreads);
     if (!threadInfos)
     {
         fprintf(stderr, "Erro de alocação de memória\n");
-        exit(2);
+        free(buffer.values);
+        free(threadsCons);
+        return 2;
     }
     
-    if(pthread_create(&threadProd, NULL, producer, (void *) (argv[3])))
+    
+    if (pthread_create(&threadProd, NULL, producer, (void *) (argv[3])))
     {
         printf("Erro na criacao da thread produtora\n");
-        exit(1);
+        free(buffer.values);
+        free(threadsCons);
+        free(threadInfos);
+
+        return 3;
     }
     
-    for(i = 0; i < numOfThreads; i++)
+    for (i = 0; i < numOfThreads; i++)
     {   
         threadInfos[i].primesCounted = 0;
-        if(pthread_create(&threadsCons[i], NULL, consumer, (void *) (&threadInfos[i])))
+        if (pthread_create(&threadsCons[i], NULL, consumer, (void *) (&threadInfos[i])))
         {
             printf("Erro na criacao de uma thread consumidora\n");
-            exit(1);
+            free(buffer.values);
+            free(threadsCons);
+            free(threadInfos);
+
+            return 4;
         }
     }
 
-    if(pthread_join(threadProd, NULL))
+   if (pthread_join(threadProd, NULL))
     {
         printf("Erro ao aguardar a thread produtora\n");
-        exit(1);
+        free(buffer.values);
+        free(threadsCons);
+        free(threadInfos);
+
+        return 5;
     }
 
-    for(i = 0; i < numOfThreads; i++)
+   for (i = 0; i < numOfThreads; i++)
     {
-        if(pthread_join(threadsCons[i], NULL))
+       if (pthread_join(threadsCons[i], NULL))
         {
             printf("Erro ao aguardar uma thread consumidora\n");
-            exit(1);
+            free(buffer.values);
+            free(threadsCons);
+            free(threadInfos);
+            
+            return 6;
         }
     }
 
-    for(i = 0; i < numOfThreads; i++)
+   for (i = 0; i < numOfThreads; i++)
     {
         concurrentNumOfPrimes += threadInfos[i].primesCounted;
-        if(threadInfos[i].primesCounted > maxPrimes)
+       if (threadInfos[i].primesCounted > maxPrimes)
         {
             maxPrimes = threadInfos[i].primesCounted;
             winnerIndex = i;
@@ -141,9 +159,11 @@ int main(int argc, char* argv[])
     free(threadsCons);
     free(threadInfos);
 
-    sem_destroy(&consumedSem);
+    sem_destroy(&buffer.emptySlot);
+    sem_destroy(&buffer.fullSlot);
+    sem_destroy(&buffer.mutexCons);
     
-    if(sequentialNumOfPrimes == concurrentNumOfPrimes)
+    if (sequentialNumOfPrimes == concurrentNumOfPrimes)
     {
         return 0;
     }
@@ -164,7 +184,7 @@ void bufferInsert(long long int element)
 long long int bufferRemove()
 {
     long long int element;
-    
+
     sem_wait(&buffer.fullSlot);
     sem_wait(&buffer.mutexCons);
     element = buffer.values[buffer.out];
@@ -177,7 +197,7 @@ long long int bufferRemove()
 
 void *producer(void *arg)
 {
-    char* filePath = (char *) arg;
+    char *filePath = (char *) arg;
     FILE *file;
     long long int ret;
     long long int element;
@@ -187,14 +207,14 @@ void *producer(void *arg)
     if (!file)
     {
         fprintf(stderr, "Erro de abertura de arquivo %s\n", filePath);
-        exit(3);
+        exit(7);
     }
 
     ret = fread(&arraySize, sizeof(long long int), 1, file);
     if (!ret)
     {
         fprintf(stderr, "Erro de leitura das dimensões do vetor do arquivo\n");
-        exit(3);
+        exit(8);
     }
     
     while(i < arraySize)
@@ -203,21 +223,26 @@ void *producer(void *arg)
         if (!ret)
         {
             fprintf(stderr, "Erro de leitura de um dos elementos do vetor\n");
-            exit(4);
+            exit(9);
         }
         bufferInsert(element);
         i++;
     }
-
+    
     ret = fread(&sequentialNumOfPrimes, sizeof(long long int), 1, file);
     if (!ret)
     {
         fprintf(stderr, "Erro de leitura do número de primos do vetor do arquivo\n");
-        exit(3);
+        exit(10);
+    }
+
+    for (i = 0; i < buffer.size; i++)
+    {
+        // Valor para indicar que o produtor já terminou de produzir
+        bufferInsert(-1);
     }
 
     fclose(file);
-    
     pthread_exit(NULL);
 }
 
@@ -228,17 +253,15 @@ void *consumer(void *arg)
 
     while(1)
     {
-        sem_wait(&consumedSem);
-        if (consumedCount >= arraySize)
+        element = bufferRemove();
+        if (element == -1)
         {
-            sem_post(&consumedSem);
+            // Devolve o -1 para que outras threads consumidoras saibam que o produtor terminou de produzir
+            bufferInsert(-1);
             break;
         }
-        element = bufferRemove();
-        consumedCount++;
-        sem_post(&consumedSem);
 
-        if(ehPrimo(element))
+        if (ehPrimo(element))
         {
             thread->primesCounted += 1;
         }
